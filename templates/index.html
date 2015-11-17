@@ -1,0 +1,168 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<html lang="en"> <head>
+<title>Appointments</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link rel="stylesheet" type="text/css"
+     href="//cdn.jsdelivr.net/bootstrap/latest/css/bootstrap.css"
+/>
+
+<link rel="stylesheet" type="text/css"
+ href="/static/js/node_modules/bootstrap-daterangepicker/daterangepicker.css"
+/>
+
+<link rel="stylesheet" type="text/css"
+    href="/static/css/busy.css"
+/>
+
+<!-- jquery from a content distribution network; probably cached -->
+<script type="text/javascript"
+     src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js">
+</script>
+
+
+<!-- The rest of our javascript dependencies are bundled and -->
+<!-- 'minified' by 'browserify'  -->
+<script type="text/javascript" 
+   src="/static/js/busy.min.js">
+</script>
+
+</head>
+<body>
+<div class="container">
+
+<!--Display the busy times from ALL calendars selected that fall
+within the range given by user in 'daterange'-->
+<!--There is no distrinction made from which calendar a busy time starts and ends-->
+<h1>Busy times</h1>
+<div><u>Displaying selected calendars</u></div>
+<div class="container">
+<span style="float: left; margin-right:75px;">START:</span>
+<span style="float: left;">END:</span>
+</div>
+<div class="container">
+<span class="start" style="float: left; margin-right:50px;"></span>
+<span class="end" style="float: left;"></span>
+</div>
+
+<h2>Date range</h2>
+<span>(First choose a range of dates to check for busy times FORMAT: MM/DD/YYYY - MM/DD/YYYY)</span>
+  <form action="/setrange" method="post">
+  <input type="text" name="daterange" size="12"
+    {% if session.daterange is defined %}
+         value="{{session.daterange}}"
+    {% endif %}
+     class="pull-down"
+     style="background: #FFFFCC; cursor: pointer; padding: 5px 10px;
+     border: 1px solid #ccc; width: 12em" >
+  <script type="text/javascript">  
+  $(function() {
+  $('input[name="daterange"]').daterangepicker(
+    {    ranges: {
+           'Today': [moment(), moment()],
+           'Tomorrow':[moment().add(1, 'days'),
+                       moment().add(1, 'days')], 
+           'This week':[moment(), moment().endOf('week')],
+           'Next week':[moment().add(7, 'days').startOf('week'),
+                        moment().add(7, 'days').endOf('week')],
+           'This month':[moment(), moment().endOf('month')],
+           'Within two weeks':[moment(),moment().add(15, 'days')]
+        }}
+       );
+    });
+</script>
+</br><!--Choose button--Send range of dates to /setrange and show available calendars--><input type="submit" onClick="chosen()" class="btn btn-default" value="Choose"></input>
+</form>
+
+<!--Show the calendar list (if we have it).  This will need to be turned into a form from which calendars can be picked. Up to three entries are shown in each row (but the order is across then down; I would prefer down then across). -->
+{% if session.calendars is defined  %}
+  <div class="row">
+  <span>Now select the calendars you would like to check</span>
+  {% for cal in session.calendars %}
+          <div class="col-md-4"><input type=checkbox name="calendar" id="{{ cal.id }}"><!--list of calendars from google acct-->
+	   {{ cal.summary }}
+          </div>
+         {% if loop.index is divisibleby 3 %}
+          </div> <div class="row">
+         {% endif %}
+  {% endfor %}
+<button type="button" onclick="chosen()">Show Busy Times</button>
+  </div>
+{% endif %}
+
+</div>  <!-- container (for bootstrap) -->
+
+<script type="text/javascript">
+
+    
+
+
+    $SCRIPT_ROOT = {{ request.script_root|tojson|safe }};
+
+    /*chosen() : This function is called once a user Chooses a range of dates and clicks the 'Choose' button. It gathers which calendars are checked, sends the list via JSON request to '/choose' and receives a list of start and end times for busy sections in each calendar and displays the result.*/
+    function chosen() {      
+        
+	//select available calendars via checkboxes    
+        var checkBoxes = document.getElementsByName('calendar');
+        var chosenCal = [];
+        for (var i = 0; i < checkBoxes.length; i++) {
+            if (checkBoxes[i].checked) {
+            chosenCal.push(checkBoxes[i].id); }
+        }
+        
+	//convert list to JSON
+        chosenCal = JSON.stringify({ 'cals': chosenCal });      
+       
+	// AJAX request
+        $.getJSON($SCRIPT_ROOT + '/choose',
+            { selected: chosenCal },
+		/*Mediocre method function to retrieve start/end times 			from our returned request JSON object and send to doc*/
+                function(times) { 
+		    //convert JSONified object into string
+                    busyT = JSON.stringify({ 'busy': times.busyT });
+                        
+		    //variables to help us with our scanner
+		    var start = end = [];
+		    var scan = startBusy = false;
+		
+		    //Scan through returned string to extract start/end
+		    //busy times and seperate for display
+		    for (x in busyT) {
+				
+		        if (busyT[x] == ':' && (busyT[x-2] == "d" 						|| busyT[x-2] == "t")){
+			    //begin scan
+			    scan = true;
+			    //set state to scan in start or end	
+			    if (busyT[x-2] == "d"){
+				startBusy = false;}
+			    else {
+				startBusy = true;}
+			    //move scanner to skip over ':"'
+			    x = x + 2;
+			    }
+
+			    //scan end times
+			    if (scan && busyT[x] !='"' && !startBusy){ 
+				end.push(busyT[x]); }
+			    //scan start times
+			    if (scan && busyT[x] !='"' && startBusy){ 
+				start.push(busyT[x]); }
+			    //stop scanning
+			    if (busyT[x] == 'Z' && scan){
+				scan = false; }  
+		    }
+		    //Replace 'Z' and 'T' in string with newline
+		    for (x in start) {
+		        if ( start[x] == 'Z' || start[x] == 'T'){
+		            start[x] = "<br>"; }
+		        if ( end[x] == 'Z' || end[x] == 'T'){
+			    end[x] = "<br>"; }		
+		    }
+		    //Display start/end busy times
+		    $(".start").html(start);
+		    $(".end").html(end);
+	}); // end getJSON call
+    }
+                  
+</script>
+</body></html>
